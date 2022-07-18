@@ -5,11 +5,13 @@ import hre, { ethers } from "hardhat";
 type Factory = Awaited<ReturnType<typeof ethers.getContractFactory>>;
 type Domain = Partial<{ name: string, version: string, chainId: number, verifyingContract: string }>;
 
+const LIMIT_MESSAGES_FETCHABLE = 10;
+
 describe("ChatRoom", function () {
   let contract: Awaited<ReturnType<Factory["deploy"]>>;
   let domain: Domain = { name: 'ChatBox', version: '1' };
   const types = {
-    Message: [
+    sendMessage: [
       { name: 'from', type: 'address' },
       { name: 'contents', type: 'string' }
     ]
@@ -61,7 +63,7 @@ describe("ChatRoom", function () {
     expect(await contract.nextId()).to.eq(currentId.add(1));
   });
 
-  it("fetch messages", async () => {
+  it(`fetch messages when there is more than ${LIMIT_MESSAGES_FETCHABLE} messages`, async () => {
     const [owner] = await ethers.getSigners();
 
     // create the required signature
@@ -69,15 +71,51 @@ describe("ChatRoom", function () {
     const signature = await owner._signTypedData(domain, types, value);
 
     // post fake messages 
-    await Promise.all(new Array(13).fill(null)
+    await Promise.all(new Array(LIMIT_MESSAGES_FETCHABLE + 3).fill(null)
       .map(() => contract.sendMessage(value.contents, signature))
     );
 
     // fetch all the messages and ensure only the latest were fetch
     const messages = await contract.getLast10Messages();
+    expect(messages.length).to.eq(LIMIT_MESSAGES_FETCHABLE);
     const message = messages.find((message: { id: number }) => message.id === 3 || message.id === 2 || message.id === 1);
     expect(message).to.undefined;
-  })
+  });
+
+  it(`fetch messages when there is ${LIMIT_MESSAGES_FETCHABLE} messages`, async () => {
+    const [owner] = await ethers.getSigners();
+
+    // create the required signature
+    const value = { from: owner.address, contents: "hello world" };
+    const signature = await owner._signTypedData(domain, types, value);
+
+    // post fake messages 
+    await Promise.all(new Array(LIMIT_MESSAGES_FETCHABLE).fill(null)
+      .map(() => contract.sendMessage(value.contents, signature))
+    );
+
+    // fetch all the messages and ensure only the latest were fetch
+    const messages = await contract.getLast10Messages();
+    expect(messages.length).to.eq(LIMIT_MESSAGES_FETCHABLE);
+  });
+
+  it(`fetch messages when there is less than ${LIMIT_MESSAGES_FETCHABLE} messages`, async () => {
+    const [owner] = await ethers.getSigners();
+
+    // create the required signature
+    const value = { from: owner.address, contents: "hello world" };
+    const signature = await owner._signTypedData(domain, types, value);
+
+    // post fake messages 
+    await Promise.all(new Array(LIMIT_MESSAGES_FETCHABLE / 2).fill(null)
+      .map(() => contract.sendMessage(value.contents, signature))
+    );
+
+    // fetch all the messages and ensure we fetch all the messages in the contract
+    const messages = await contract.getLast10Messages();
+    const filteredMessages = messages.filter((message: { author: string }) => message.author !== ethers.constants.AddressZero).length
+    expect(filteredMessages).to.eq(LIMIT_MESSAGES_FETCHABLE / 2);
+  });
 
   it("like message", async () => {
     const [[owner, user], messageId] = await Promise.all([ethers.getSigners(), contract.nextId()]);

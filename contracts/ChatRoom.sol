@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.9;
+pragma solidity >=0.8.9 <0.9.0;
+
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol";
 
 /// @title Ledger workshop
 /// @notice This contract is a chatbox, you can post/like message and fetch the last 10 messages
@@ -7,7 +10,7 @@ pragma solidity ^0.8.9;
           do not use this contact as an example
  */
 /// @custom:experimental Do not use this contract in production!
-contract ChatRoom {
+contract ChatRoom is EIP712 {
     // avoid dealing with a cold word
     uint256 public nextId = 1;
     mapping(uint256 => Message) messages;
@@ -22,6 +25,7 @@ contract ChatRoom {
 
     error EmptyMessage();
     error MessageDoesntExist();
+    error InvalidSignature();
 
     event MessageSent(uint256 indexed id, address indexed author);
     event MessageLiked(
@@ -29,6 +33,8 @@ contract ChatRoom {
         address indexed likedBy,
         address indexed author
     );
+
+    constructor() EIP712("ChatBox", "1") {}
 
     /// @notice Allow anyone to send a message
     /**  @dev Right now the signature isn't verified because there is an issue 
@@ -41,8 +47,22 @@ contract ChatRoom {
         external
     {
         if (bytes(content).length == 0) revert EmptyMessage();
-        uint256 currentId = nextId;
 
+        // verify the signature
+        bytes32 digest = _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    keccak256("sendMessage(address from,string contents)"),
+                    msg.sender,
+                    keccak256(bytes(content))
+                )
+            )
+        );
+        address signer = ECDSA.recover(digest, signature);
+        if (signer != msg.sender) revert InvalidSignature();
+
+        // save the message
+        uint256 currentId = nextId;
         Message memory message = Message(
             block.timestamp,
             0,
@@ -50,7 +70,6 @@ contract ChatRoom {
             content,
             msg.sender
         );
-
         messages[currentId] = message;
 
         // increse the global id by 1
